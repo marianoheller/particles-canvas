@@ -1,0 +1,7 @@
+{
+  "scripts": {
+    "build": "elm make src/Main.elm --output assets/js/particles.js",
+    "build:debug": "elm make src/Main.elm --output assets/js/particles.js --debug",
+    "watch": "chokidar **/*.elm -c \"npm run build\" --initial"
+  }
+}
