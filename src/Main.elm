@@ -2,7 +2,7 @@ module Main exposing (main)
 
 import Browser
 import Browser.Dom exposing (Viewport, getViewport)
-import Browser.Events exposing (onAnimationFrameDelta)
+import Browser.Events exposing (onAnimationFrameDelta, onResize)
 import Canvas exposing (..)
 import Canvas.Settings exposing (..)
 import Canvas.Settings.Advanced as Advanced
@@ -11,7 +11,6 @@ import Canvas.Settings.Text exposing (..)
 import Canvas.Texture exposing (..)
 import Color
 import Html exposing (Html)
-import Html.Attributes as Attrs
 import Html.Events.Extra.Mouse as Mouse
 import Math.Vector2 exposing (..)
 import Random as Random
@@ -22,9 +21,14 @@ import Task as Task
 -- CONFIG
 
 
+minDistance : Float
+minDistance =
+    150
+
+
 qtyParticlesMin : Int
 qtyParticlesMin =
-    40
+    50
 
 
 logoUrl : String
@@ -77,6 +81,27 @@ type alias Flags =
     }
 
 
+{-| -}
+type alias Device =
+    { class : DeviceClass
+    , orientation : Orientation
+    }
+
+
+{-| -}
+type DeviceClass
+    = Phone
+    | Tablet
+    | Desktop
+    | BigDesktop
+
+
+{-| -}
+type Orientation
+    = Portrait
+    | Landscape
+
+
 
 -- INIT
 
@@ -113,6 +138,7 @@ init flags =
 type Msg
     = Frame Float
     | GotViewport Viewport
+    | WindowResized
     | Populate (List ( Position, Direction, Radius ))
     | CanvasClick ( Float, Float )
     | LogoLoaded (Maybe Texture)
@@ -165,6 +191,9 @@ update msg model =
             , Cmd.none
             )
 
+        WindowResized ->
+            ( model, Task.perform GotViewport getViewport )
+
         CanvasClick ( x, y ) ->
             ( model, Random.generate Populate <| Random.list 3 <| tupleGeneratorAt x y )
 
@@ -185,13 +214,13 @@ filterOutOffscreenParticles { height, width } =
     let
         filterOut (Particle pos _ radius) =
             not <|
-                (getX pos - radius)
+                (getX pos - radius - minDistance)
                     > width
-                    || (getX pos + radius)
+                    || (getX pos + radius + minDistance)
                     < 0
-                    || (getY pos - radius)
+                    || (getY pos - radius - minDistance)
                     > height
-                    || (getY pos + radius)
+                    || (getY pos + radius + minDistance)
                     < 0
     in
     List.filter filterOut
@@ -242,30 +271,46 @@ view model =
             [ fill <| Color.rgb 0.4 0.4 0.4 ]
             [ rect ( 0, 0 ) width height ]
         ]
-            ++ ([ drawConnections model.particles ]
-                    ++ drawMap model.map
-                    ++ List.map drawParticle model.particles
-                    ++ drawLogo width height model.logo
-               )
+            ++ drawConnections model.particles
+            ++ viewMap model.window model.map
+            ++ List.map drawParticle model.particles
+            ++ drawLogo model.window model.logo
 
 
-drawMap : Maybe Texture -> List Renderable
-drawMap maybeMap =
+viewMap : Window -> Maybe Texture -> List Renderable
+viewMap window maybeMap =
     case maybeMap of
         Nothing ->
             []
 
         Just map ->
+            let
+                { width, height } =
+                    dimensions map
+
+                widthScale =
+                    min 1 (window.width / width)
+
+                heightScale =
+                    (window.height / height) * widthScale
+
+                newHeight =
+                    height * heightScale
+            in
             [ texture
-                []
-                -- Advanced.transform [Advanced.scale 0.9 0.9]
-                ( 0, 0 )
+                [ Advanced.transform
+                    [ Advanced.scale
+                        widthScale
+                        heightScale
+                    ]
+                ]
+                ( 0, ((window.height / 2) - (newHeight / 2)) / heightScale )
                 map
             ]
 
 
-drawLogo : Float -> Float -> Maybe Texture -> List Renderable
-drawLogo canvasWidth canvasHeight maybeLogo =
+drawLogo : Window -> Maybe Texture -> List Renderable
+drawLogo window maybeLogo =
     case maybeLogo of
         Nothing ->
             []
@@ -274,22 +319,40 @@ drawLogo canvasWidth canvasHeight maybeLogo =
             let
                 { width, height } =
                     dimensions logo
+
+                aspectRatio =
+                    width / height
+
+                widthScale =
+                    min 1 (window.width / width)
+
+                heightScale =
+                    (widthScale * width) / (aspectRatio * height)
+
+                newWidth = width * widthScale
             in
             [ texture
-                []
-                ( (canvasWidth / 2) - (width / 2), (canvasHeight / 2) - (height / 2) )
+                [ Advanced.transform
+                    [ Advanced.scale
+                        widthScale
+                        heightScale
+                    ]
+                ]
+                ( ((window.width / 2) - (newWidth / 2)) / widthScale
+                , ((window.height / 2) - (height / 2)) / heightScale
+                )
                 logo
             ]
 
 
 colorParticle : Color.Color
 colorParticle =
-    Color.rgb 0.6 0.6 0.6
+    Color.rgb 0.7 0.7 0.7
 
 
-colorConnection : Color.Color
-colorConnection =
-    Color.rgba 0.6 0.6 0.6 0.2
+modifyAlpha : Float -> Color.Color -> Color.Color
+modifyAlpha alpha =
+    Color.fromRgba << (\r -> { r | alpha = alpha }) << Color.toRgba
 
 
 drawParticle : Particle -> Renderable
@@ -299,30 +362,31 @@ drawParticle (Particle pos _ radius) =
         ]
 
 
-drawConnections : List Particle -> Renderable
+drawConnections : List Particle -> List Renderable
 drawConnections particles =
     let
-        minDistance =
-            150
-
-        drawConnection from to =
+        drawPath from to =
             path ( getX from, getY from )
                 [ lineTo ( getX to, getY to )
                 ]
 
+        drawConnection from to =
+            shapes
+                [ stroke <|
+                    modifyAlpha (1 - distance from to / minDistance) colorParticle
+                , lineWidth 1
+                ]
+                [ drawPath from to ]
+
         folder (Particle pos _ _) acc =
             acc
-                ++ (List.filter (\(Particle pos2 _ _) -> distance pos pos2 < minDistance)
+                ++ (List.filter
+                        (\(Particle pos2 _ _) -> distance pos pos2 < minDistance)
                         particles
                         |> List.map (\(Particle pos2 _ _) -> drawConnection pos pos2)
                    )
     in
-    shapes
-        [ stroke colorConnection
-        , lineWidth 1
-        ]
-    <|
-        List.foldr folder [] particles
+    List.foldr folder [] particles
 
 
 
@@ -331,7 +395,10 @@ drawConnections particles =
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
-    onAnimationFrameDelta Frame
+    Sub.batch
+        [ onAnimationFrameDelta Frame
+        , onResize (\_ _ -> WindowResized)
+        ]
 
 
 
@@ -421,6 +488,36 @@ randomPair3 :
     -> Random.Generator ( a, b, c )
 randomPair3 genA genB genC =
     Random.map3 (\a b c -> ( a, b, c )) genA genB genC
+
+
+classifyDevice : { window | height : Float, width : Float } -> Device
+classifyDevice window =
+    { class =
+        let
+            longSide =
+                max window.width window.height
+
+            shortSide =
+                min window.width window.height
+        in
+        if shortSide < 600 then
+            Phone
+
+        else if longSide <= 1200 then
+            Tablet
+
+        else if longSide > 1200 && longSide <= 1920 then
+            Desktop
+
+        else
+            BigDesktop
+    , orientation =
+        if window.width < window.height then
+            Portrait
+
+        else
+            Landscape
+    }
 
 
 
