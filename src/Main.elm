@@ -81,27 +81,6 @@ type alias Flags =
     }
 
 
-{-| -}
-type alias Device =
-    { class : DeviceClass
-    , orientation : Orientation
-    }
-
-
-{-| -}
-type DeviceClass
-    = Phone
-    | Tablet
-    | Desktop
-    | BigDesktop
-
-
-{-| -}
-type Orientation
-    = Portrait
-    | Landscape
-
-
 
 -- INIT
 
@@ -329,7 +308,8 @@ drawLogo window maybeLogo =
                 heightScale =
                     (widthScale * width) / (aspectRatio * height)
 
-                newWidth = width * widthScale
+                newWidth =
+                    width * widthScale
             in
             [ texture
                 [ Advanced.transform
@@ -488,36 +468,6 @@ randomPair3 :
     -> Random.Generator ( a, b, c )
 randomPair3 genA genB genC =
     Random.map3 (\a b c -> ( a, b, c )) genA genB genC
-
-
-classifyDevice : { window | height : Float, width : Float } -> Device
-classifyDevice window =
-    { class =
-        let
-            longSide =
-                max window.width window.height
-
-            shortSide =
-                min window.width window.height
-        in
-        if shortSide < 600 then
-            Phone
-
-        else if longSide <= 1200 then
-            Tablet
-
-        else if longSide > 1200 && longSide <= 1920 then
-            Desktop
-
-        else
-            BigDesktop
-    , orientation =
-        if window.width < window.height then
-            Portrait
-
-        else
-            Landscape
-    }
 
 
 
